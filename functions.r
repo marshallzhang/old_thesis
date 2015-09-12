@@ -4,7 +4,6 @@ library(coda)
 library(microbenchmark)
 library(mixtools)
 
-
 #
 # Welling-Teh functions.
 # 
@@ -27,8 +26,8 @@ d.bimodal = function(proposal, data, params) {
   sigma.2.2 = params[["sigma.2.2"]]
   
   theta.cov = diag(c(sigma.1.2, sigma.2.2))
-  sum(log((1/2) * (dnorm(data, theta.1, sqrt(sigma.x.2)) + dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2))))) +
-    log(dmvnorm(proposal, c(0, 0), theta.cov))
+  (sum(log((1/2) * (dnorm(data, theta.1, sqrt(sigma.x.2)) + dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2))))) +
+    log(dmvnorm(proposal, c(0, 0), theta.cov)))
 }
 
 # Gradient of bimodal posterior density.
@@ -40,17 +39,14 @@ grad.d.bimodal = function(proposal, data, params) {
   sigma.1.2 = params[["sigma.1.2"]]
   sigma.2.2 = params[["sigma.2.2"]]
   
-  common = (
-    (1 / 2) * dnorm(data, theta.1, sqrt(sigma.x.2)) + dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2))
-  )^(-1)
+  d.1 = dnorm(data, theta.1, sqrt(sigma.x.2))
+  d.2 = dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2))
   
-  grad.1 = common * (1 / 2) * 
-  (dnorm(data, theta.1, sqrt(sigma.x.2)) * solve(sigma.x.2) * (data - theta.1) +
-     dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2)) * solve(sigma.x.2) * (data - theta.1 - theta.2)
-  )
+  common = ((1 / 2) * (d.1 + d.2))^(-1)
   
-  grad.2 = common * (1 / 2) * 
-     dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2)) * solve(sigma.x.2) * (data - theta.1 - theta.2)
+  grad.1 = common * (1 / 2) * (d.1 * sigma.x.2^(-1) * (data - theta.1) + d.2 * sigma.x.2^(-1) * (data - theta.1 - theta.2))
+  
+  grad.2 = common * (1 / 2) * (d.2 * sigma.x.2^(-1) * (data - theta.1 - theta.2))
   
   theta.cov = diag(c(sigma.1.2, sigma.2.2))
   prior = - solve(theta.cov) %*% t(t(c(theta.1, theta.2)))
@@ -83,25 +79,25 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n) {
   
   - hessian / sample.n 
 }
-
-mc.fisher = function(proposal, sample.n, pseudo.n) {
-  
-  hessian = 0
-  
-  for (i in 1:sample.n) {
-    var = 2
-    pseudodata = rnorm(pseudo.n, proposal, var)
-    
-    perturb = t((rbinom(length(proposal), 1, 0.5) * 2 - 1) * 0.0001)
-    
-    g = - sum((var)^(-1) * (pseudodata - proposal - perturb) - (var)^(-1) * (pseudodata - proposal + perturb))
-    
-    hessian = hessian + (t(g) %*% perturb^(-1) / 2 +
-    t(t(g)) %*% perturb^(-1) / 2) / 2
-  }
-  
-  - hessian / sample.n
-}
+# 
+# mc.fisher = function(proposal, sample.n, pseudo.n) {
+#   
+#   hessian = 0
+#   
+#   for (i in 1:sample.n) {
+#     var = 2
+#     pseudodata = rnorm(pseudo.n, proposal, var)
+#     
+#     perturb = t((rbinom(length(proposal), 1, 0.5) * 2 - 1) * 0.0001)
+#     
+#     g = - sum((var)^(-1) * (pseudodata - proposal - perturb) - (var)^(-1) * (pseudodata - proposal + perturb))
+#     
+#     hessian = hessian + (t(g) %*% perturb^(-1) / 2 +
+#     t(t(g)) %*% perturb^(-1) / 2) / 2
+#   }
+#   
+#   - hessian / sample.n
+# }
 
 
 
@@ -153,7 +149,7 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
   q = current.q
   p = rnorm(length(q), 0, 1)
   current.p = p
-  L = sample(10:25, 1)
+  L = sample(13:17, 1)
   
   # Make a half step for momentum at the beginning.
   p = p - epsilon * grad.U(q) / 2
@@ -184,7 +180,7 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
   
   # Accept or reject the state at end of trajectory, returning either 
   # the position at the end of the trajectory or the initial position.
-  if (runif(1) < exp(current.U - proposed.U + current.K - proposed.K)) {
+  if (runif(1) < min(1, exp(current.U - proposed.U + current.K - proposed.K))) {
     q
   } else {
     current.q
