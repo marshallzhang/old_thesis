@@ -82,13 +82,6 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n) {
   - hessian / (sample.n * pseudo.n)
 }
 
-microbenchmark(mc.fisher(c(1,2), welling.teh, 1000, 100),
-               mc.fisher(c(1,2), welling.teh, 100, 100),
-               times = 5)
-
-
-mc.fisher(c(1,2), welling.teh, 50, 100)
-
 #
 # MCMC algorithms.
 #
