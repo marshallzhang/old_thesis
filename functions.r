@@ -3,6 +3,8 @@ library(mvtnorm)
 library(coda)
 library(microbenchmark)
 library(mixtools)
+library(MASS)
+library(RColorBrewer)
 
 #
 # Welling-Teh functions.
@@ -77,29 +79,15 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n) {
     hessian = hessian + (diff.g %*% perturb^(-1) / 2 + t(diff.g %*% perturb^(-1)) / 2) / 2
   }
   
-  - hessian / sample.n 
+  - hessian / (sample.n * pseudo.n)
 }
-# 
-# mc.fisher = function(proposal, sample.n, pseudo.n) {
-#   
-#   hessian = 0
-#   
-#   for (i in 1:sample.n) {
-#     var = 2
-#     pseudodata = rnorm(pseudo.n, proposal, var)
-#     
-#     perturb = t((rbinom(length(proposal), 1, 0.5) * 2 - 1) * 0.0001)
-#     
-#     g = - sum((var)^(-1) * (pseudodata - proposal - perturb) - (var)^(-1) * (pseudodata - proposal + perturb))
-#     
-#     hessian = hessian + (t(g) %*% perturb^(-1) / 2 +
-#     t(t(g)) %*% perturb^(-1) / 2) / 2
-#   }
-#   
-#   - hessian / sample.n
-# }
+
+microbenchmark(mc.fisher(c(1,2), welling.teh, 1000, 100),
+               mc.fisher(c(1,2), welling.teh, 100, 100),
+               times = 5)
 
 
+mc.fisher(c(1,2), welling.teh, 50, 100)
 
 #
 # MCMC algorithms.
