@@ -57,29 +57,74 @@ grad.d.bimodal = function(proposal, data, params) {
   
 }
 
-mc.fisher = function(proposal, params, sample.n, pseudo.n) {
+# Compute numerical Fisher information and its derivatives.
+mc.fisher = function(proposal, params, sample.n, pseudo.n, snd = 0) {
   
+  c = 0.0001
+  
+  # Get perturbation for one dimension if taking derivative of Hessian.
+  if (snd > 0) {
+    perturb.2 = rep(0, length(proposal))
+    perturb.2[snd] = c
+  }
+  
+  # Set up.
   params[["theta.1"]] = proposal[1]
   params[["theta.2"]] = proposal[2]
-  
   theta.1 = params[["theta.1"]]
   theta.2 = params[["theta.2"]]
   sigma.x.2 = params[["sigma.x.2"]]
   sigma.1.2 = params[["sigma.1.2"]]
   sigma.2.2 = params[["sigma.2.2"]]
   
+  # Start Hessian.
   hessian = matrix(rep(0, length(proposal) * 2), length(proposal), length(proposal))
   
   for (i in 1:sample.n) {
+    
+    # Generate vector from proposed parameters.
     pseudodata = r.bimodal(pseudo.n, params)
     
-    perturb = t((rbinom(length(proposal), 1, 0.5) * 2 - 1) * 0.0001)
+    # Make perturbation vector.
+    perturb = ((rbinom(length(proposal), 1, 0.5) * 2 - 1) * c)
     
-    diff.g = t(grad.d.bimodal(proposal + perturb, pseudodata, params) - grad.d.bimodal(proposal - perturb, pseudodata, params))
+    # For derivative of Fisher information, or for regular Fisher information, find numerical derivatives.
+    if (snd > 0) {
+      diff.g.plus = (grad.d.bimodal(proposal + perturb + perturb.2, pseudodata, params) - grad.d.bimodal(proposal + perturb - perturb.2, pseudodata, params)) * c^(-1)
+      diff.g.minus = (grad.d.bimodal(proposal - perturb + perturb.2, pseudodata, params) - grad.d.bimodal(proposal - perturb - perturb.2, pseudodata, params)) * c^(-1)
+      diff.g = t(diff.g.plus - diff.g.minus)
+    } else {
+      diff.g = t(grad.d.bimodal(proposal + perturb, pseudodata, params) - grad.d.bimodal(proposal - perturb, pseudodata, params))
+    }
+    
+    # Get Hessian.
     hessian = hessian + (diff.g %*% perturb^(-1) / 2 + t(diff.g %*% perturb^(-1)) / 2) / 2
   }
   
   - hessian / (sample.n * pseudo.n)
+}
+
+# Compute RM Hamiltonian.
+H = function(theta, p, data, params, sample.n, pseudo.n) {
+  G = mc.fisher(theta, params, sample.n, pseudo.n)
+  -d.bimodal(theta, data, params) + log((2 * pi)^(2) * det(G)) / 2 + p %*% solve(G) %*% t(p)
+}
+
+# Compute gradient of RM Hamiltonian wrt theta.
+grad.theta.H = function(theta, p, data, params, sample.n, pseudo.n) {
+  G = mc.fisher(theta, params, sample.n, pseudo.n)
+  d.G.1 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 1)
+  d.G.2 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 2)
+  inv.G = solve(G)
+  
+  c(-sum(diag(inv.G %*% d.G.1)) / 2 + p %*% inv.G %*% d.G.1 %*% inv.G %*% t(p) / 2,
+    -sum(diag(inv.G %*% d.G.2)) / 2 + p %*% inv.G %*% d.G.2 %*% inv.G %*% t(p) / 2) + grad.d.bimodal(theta, data, params)
+}
+
+# Compute gradient of RM Hamiltonian wrt p.
+grad.p.H = function(theta, p, data, params, sample.n, pseudo.n) {
+  G = mc.fisher(theta, params, sample.n, pseudo.n)
+  solve(G) %*% t(p)
 }
 
 #
@@ -87,7 +132,7 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n) {
 #
 
 # MCMC wrapper function.
-mcmc = function(start, iterations, burn, type, ...) {
+mcmc = function(start, iterations, burn, type, trace, ...) {
   
   # Initialize storage.
   draws = array(dim = c(iterations + 1, length(start)))
@@ -95,11 +140,14 @@ mcmc = function(start, iterations, burn, type, ...) {
   
   # Iterate.
   for (i in 1:iterations) {
+    if (trace != 0) if (i %% trace == 0) print(paste("Iteration", i, "of", iterations))
     draws[i + 1, ] = 
       if (type == "mh") {
         mcmc.mh(draws[i, ], ...)
       } else if (type == "hmc") {
         mcmc.hmc(draws[i,], ...)
+      } else if (type == "srm-hmc") {
+        mcmc.srm.hmc(draws[i,], ...)
       }
   }
   
@@ -130,7 +178,7 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
   q = current.q
   p = rnorm(length(q), 0, 1)
   current.p = p
-  L = sample(13:17, 1)
+  L = sample(8:10, 1)
   
   # Make a half step for momentum at the beginning.
   p = p - epsilon * grad.U(q) / 2
@@ -168,37 +216,40 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
   }
 }
 
-mcmc.rmhmc = function(current.theta, H, rm.U, rm.grad.U, fixed.point.steps) {
+# RM HMC with stochastic metric.
+mcmc.srm.hmc = function(current.theta, H, grad.theta.H, grad.p.H, fixed.point.steps, epsilon) {
   theta = current.theta
-  p = rnorm(length(theta), 0, 1)
+  p = t(rnorm(length(theta), 0, 1))
   current.H = H(theta, p)
-  N = sample(10:25, 1)
+  N = sample(7:9, 1)
   
   for (n in 1:N) {
     
     # Update momentum with fixed point iterations.
     hat.p = p
     for (i in 1:fixed.point.steps) {
-      hat.p = p - epsilon * rm.grad.U(theta, hat.p) / 2
+      hat.p = p - epsilon * grad.theta.H(theta, hat.p) / 2
     }
     p = hat.p
     
     # Update parameters with fixed point iterations.
     hat.theta = theta
     for (i in 1:fixed.point.steps) {
-      hat.theta = theta + (epsilon * rm.U(theta, p) + epsilon * rm.U(hat.theta, p)) / 2
+      hat.theta = theta + (epsilon * grad.p.H(theta, p) + epsilon * grad.p.H(hat.theta, p)) / 2
     }
     theta = hat.theta
     
     # Update momentum exactly.
-    p = p - epsilon * rm.grad.U(theta, p)
+    p = p - epsilon * grad.theta.H(theta, p) / 2
   }
   
-  proposed.H = H(theta, p)
+  proposed.H = H(t(theta), p)
   
   ratio = -log(proposed.H) + log(current.H)
   
   if (ratio > 0 | ratio > log(runif(1))) {
+    print("accept")
+    print(theta)
     theta
   } else{
     current.theta
