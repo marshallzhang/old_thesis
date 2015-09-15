@@ -7,58 +7,27 @@ library(MASS)
 library(RColorBrewer)
 
 #
-# Welling-Teh functions.
+# Normal functions.
 # 
 
-# Bimodal posterior draws.
-r.bimodal = function(n, params) {
-  rnormmix(n, c(0.5, 0.5), 
-           c(params[["theta.1"]], params[["theta.1"]] + params[["theta.2"]]),
-           rep(sqrt(params[["sigma.x.2"]]), 2)
-           )
+# Normal draws.
+r.normal = function(n, params) {
+  rnorm(n, mean = params[1], sd = params[2])
 }
 
-# Bimodal posterior density.
-d.bimodal = function(proposal, data, params) {
-  
-  theta.1 = proposal[1]
-  theta.2 = proposal[2]
-  sigma.x.2 = params[["sigma.x.2"]]
-  sigma.1.2 = params[["sigma.1.2"]]
-  sigma.2.2 = params[["sigma.2.2"]]
-  
-  theta.cov = diag(c(sigma.1.2, sigma.2.2))
-  (sum(log((1/2) * (dnorm(data, theta.1, sqrt(sigma.x.2)) + dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2))))) +
-    log(dmvnorm(proposal, c(0, 0), theta.cov)))
+# Normal density.
+d.normal = function(params, data) {
+  sum(dnorm(data, mean = params[1], sd = params[2], log = T))
 }
 
-# Gradient of bimodal posterior density.
-grad.d.bimodal = function(proposal, data, params) {
-  
-  theta.1 = proposal[1]
-  theta.2 = proposal[2]
-  sigma.x.2 = params[["sigma.x.2"]]
-  sigma.1.2 = params[["sigma.1.2"]]
-  sigma.2.2 = params[["sigma.2.2"]]
-  
-  d.1 = dnorm(data, theta.1, sqrt(sigma.x.2))
-  d.2 = dnorm(data, theta.1 + theta.2, sqrt(sigma.x.2))
-  
-  common = ((1 / 2) * (d.1 + d.2))^(-1)
-  
-  grad.1 = common * (1 / 2) * (d.1 * sigma.x.2^(-1) * (data - theta.1) + d.2 * sigma.x.2^(-1) * (data - theta.1 - theta.2))
-  
-  grad.2 = common * (1 / 2) * (d.2 * sigma.x.2^(-1) * (data - theta.1 - theta.2))
-  
-  theta.cov = diag(c(sigma.1.2, sigma.2.2))
-  prior = - solve(theta.cov) %*% t(t(c(theta.1, theta.2)))
-  
-  t(c(sum(grad.1), sum(grad.2)) + prior) / length(data)
-  
+# Gradient of bivariate normal density.
+grad.d.normal= function(params, data) {
+  -c((length(data) * params[1] - sum(data)) / params[2]^2, 
+    length(data) / (2 * params[2]^2) - (1 / (2 * params[2]^4)) * sum((data - params[1])^2))
 }
 
 # Compute numerical Fisher information and its derivatives.
-mc.fisher = function(proposal, params, sample.n, pseudo.n, snd = 0) {
+mc.fisher = function(covariance, sample.n, pseudo.n, snd = 0) {
   
   c = 0.0001
   
@@ -67,15 +36,6 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n, snd = 0) {
     perturb.2 = rep(0, length(proposal))
     perturb.2[snd] = c
   }
-  
-  # Set up.
-  params[["theta.1"]] = proposal[1]
-  params[["theta.2"]] = proposal[2]
-  theta.1 = params[["theta.1"]]
-  theta.2 = params[["theta.2"]]
-  sigma.x.2 = params[["sigma.x.2"]]
-  sigma.1.2 = params[["sigma.1.2"]]
-  sigma.2.2 = params[["sigma.2.2"]]
   
   # Start Hessian.
   hessian = matrix(rep(0, length(proposal) * 2), length(proposal), length(proposal))
@@ -105,25 +65,35 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n, snd = 0) {
 }
 
 # Compute RM Hamiltonian.
-H = function(theta, p, data, params, sample.n, pseudo.n) {
-  G = mc.fisher(theta, params, sample.n, pseudo.n)
-  -d.bimodal(theta, data, params) + log((2 * pi)^(2) * det(G)) / 2 + p %*% solve(G) %*% t(p)
+H = function(theta, p, data, sample.n, pseudo.n) {
+#   G = mc.fisher(theta, params, sample.n, pseudo.n)
+  N = length(data)
+  G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+  -d.normal(theta, data) + log((2 * pi)^(2) * det(G)) / 2 + p %*% solve(G) %*% t(p)
 }
 
 # Compute gradient of RM Hamiltonian wrt theta.
-grad.theta.H = function(theta, p, data, params, sample.n, pseudo.n) {
-  G = mc.fisher(theta, params, sample.n, pseudo.n)
-  d.G.1 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 1)
-  d.G.2 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 2)
+grad.theta.H = function(theta, p, data, sample.n, pseudo.n) {
+#   G = mc.fisher(theta, params, sample.n, pseudo.n)
+  N = length(data)
+  G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+#   d.G.1 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 1)
+  d.G.1 = diag(c(0, 0))
+#   d.G.2 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 2)
+  d.G.2 = diag(c(- (2 * N) / theta[2]^3, - (4 * N) / theta[2]^3))
+
   inv.G = solve(G)
   
-  c(-sum(diag(inv.G %*% d.G.1)) / 2 + p %*% inv.G %*% d.G.1 %*% inv.G %*% t(p) / 2,
-    -sum(diag(inv.G %*% d.G.2)) / 2 + p %*% inv.G %*% d.G.2 %*% inv.G %*% t(p) / 2) + grad.d.bimodal(theta, data, params)
+  -grad.d.normal(theta, data) + 
+  c(sum(diag(inv.G %*% d.G.1)) / 2 - p %*% inv.G %*% d.G.1 %*% inv.G %*% t(p) / 2,
+    sum(diag(inv.G %*% d.G.2)) / 2 - p %*% inv.G %*% d.G.2 %*% inv.G %*% t(p) / 2)
 }
 
 # Compute gradient of RM Hamiltonian wrt p.
-grad.p.H = function(theta, p, data, params, sample.n, pseudo.n) {
-  G = mc.fisher(theta, params, sample.n, pseudo.n)
+grad.p.H = function(theta, p, data, sample.n, pseudo.n) {
+#   G = mc.fisher(theta, params, sample.n, pseudo.n)
+  N = length(data)
+  G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
   solve(G) %*% t(p)
 }
 
@@ -178,7 +148,7 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
   q = current.q
   p = rnorm(length(q), 0, 1)
   current.p = p
-  L = sample(3:5, 1)
+  L = sample(4:6, 1)
   
   # Make a half step for momentum at the beginning.
   p = p - epsilon * grad.U(q) / 2
@@ -219,9 +189,10 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
 # RM HMC with stochastic metric.
 mcmc.srm.hmc = function(current.theta, params, sample.n, pseudo.n, H, grad.theta.H, grad.p.H, fixed.point.steps, epsilon) {
   theta = current.theta
-  p = (rmvnorm(1, c(0, 0), mc.fisher(theta, params, sample.n, pseudo.n)))
+  G = diag(c(30 / theta[2]^2, (2 * 30) / theta[2]^2))
+  p = (rmvnorm(1, c(0, 0), diag(c(1/current.theta[2], 1 / (2 * current.theta[2]^2)))))
   current.H = H(theta, p)
-  N = sample(3:5, 1)
+  N = sample(4:6, 1)
   
   for (n in 1:N) {
     

@@ -53,7 +53,7 @@ grad.d.bimodal = function(proposal, data, params) {
   theta.cov = diag(c(sigma.1.2, sigma.2.2))
   prior = - solve(theta.cov) %*% t(t(c(theta.1, theta.2)))
   
-  t(c(sum(grad.1), sum(grad.2)) + prior)
+  t(c(sum(grad.1), sum(grad.2)) + prior) / length(data)
   
 }
 
@@ -101,7 +101,7 @@ mc.fisher = function(proposal, params, sample.n, pseudo.n, snd = 0) {
     hessian = hessian + (diff.g %*% perturb^(-1) / 2 + t(diff.g %*% perturb^(-1)) / 2) / 2
   }
   
-  - hessian / (sample.n * pseudo.n)
+  - hessian / (sample.n)
 }
 
 # Compute RM Hamiltonian.
@@ -178,7 +178,7 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
   q = current.q
   p = rnorm(length(q), 0, 1)
   current.p = p
-  L = sample(8:10, 1)
+  L = sample(3:5, 1)
   
   # Make a half step for momentum at the beginning.
   p = p - epsilon * grad.U(q) / 2
@@ -217,11 +217,11 @@ mcmc.hmc = function(current.q, U, grad.U, epsilon) {
 }
 
 # RM HMC with stochastic metric.
-mcmc.srm.hmc = function(current.theta, H, grad.theta.H, grad.p.H, fixed.point.steps, epsilon) {
+mcmc.srm.hmc = function(current.theta, params, sample.n, pseudo.n, H, grad.theta.H, grad.p.H, fixed.point.steps, epsilon) {
   theta = current.theta
-  p = t(rnorm(length(theta), 0, 1))
+  p = (rmvnorm(1, c(0, 0), mc.fisher(theta, params, sample.n, pseudo.n)))
   current.H = H(theta, p)
-  N = sample(7:9, 1)
+  N = sample(3:5, 1)
   
   for (n in 1:N) {
     
@@ -247,7 +247,7 @@ mcmc.srm.hmc = function(current.theta, H, grad.theta.H, grad.p.H, fixed.point.st
   
   ratio = -log(proposed.H) + log(current.H)
   
-  if (ratio > 0 | ratio > log(runif(1))) {
+  if (!is.na(ratio) & (ratio > 0 | ratio > log(runif(1)))) {
     print("accept")
     print(theta)
     theta

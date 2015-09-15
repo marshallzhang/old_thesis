@@ -10,43 +10,45 @@ welling.teh = list(theta.1 = 0,
                    sigma.2.2 = 1)
 
 # Generate data.
-data = r.normal(100, c(1, 4))
+data = r.normal(30, c(0, 10))
 
 # Metropolis-Hastings.
 mh.draws = NA
-mh.time = microbenchmark(mh.draws <- mcmc(start = c(-5, 2), 
-             iterations = 5550, 
-             burn = 550,
+mh.time = microbenchmark(mh.draws <- mcmc(start = c(5, 40), 
+             iterations = 200,
+             burn = 1,
              type = "mh",
              trace = 500,
              d.posterior = function(proposal) { d.normal(proposal, data)},
-             r.proposal = function(n, mean) { rnorm(n, mean = mean, sd = 0.5) }
+             r.proposal = function(n, mean) { rnorm(n, mean = mean, sd = 0.75) }
              ), times = 1)
 
 mh.esps = min(effectiveSize(as.mcmc(mh.draws))) / (mh.time$time[1] / 1e9)
 z = kde2d(mh.draws[, 1], mh.draws[, 2])
-contour(z, col = brewer.pal(9, "Blues"), xlim = c(-0, 2), ylim = c(2, 6))
+contour(z, col = brewer.pal(9, "Blues"), xlim = c(-10, 10), ylim = c(5, 40))
+lines(mh.draws[,1], mh.draws[,2])
 
 # HMC.
-hmc.time = microbenchmark(hmc.draws <- mcmc(start = c(-5, 2),
-                               iterations = 5550,
-                               burn = 550,
+hmc.time = microbenchmark(hmc.draws <- mcmc(start = c(5, 40),
+                               iterations = 200,
+                               burn = 1,
                                type = "hmc",
                                trace = 500,
                                U = function(proposal) { -d.normal(proposal, data)},
                                grad.U = function(proposal) { -grad.d.normal(proposal, data)},
-                               epsilon = 0.2), times = 1)
+                               epsilon = 0.75), times = 1)
 
 hmc.esps = min(effectiveSize(as.mcmc(hmc.draws))) / (hmc.time$time[1] / 1e9)
 z = kde2d(hmc.draws[, 1], hmc.draws[, 2])
-contour(z, col = brewer.pal(9, "Blues"), xlim = c(-0, 2), ylim = c(2, 6))
+contour(z, col = brewer.pal(9, "Blues"), xlim = c(-10, 10), ylim = c(5, 40))
+lines(hmc.draws[,1], hmc.draws[,2])
 
 # SRM-HMC.
 sample.n = 1000
 pseudo.n = 1000
-srm.hmc.time = microbenchmark(srm.hmc.draws <- mcmc(start = c(-5, 2),
-                               iterations = 500,
-                               burn = 50,
+srm.hmc.time = microbenchmark(srm.hmc.draws <- mcmc(start = c(5, 40),
+                               iterations = 200,
+                               burn = 1,
                                type = "srm-hmc",
                                trace = 1,
                                params = welling.teh,
@@ -56,7 +58,7 @@ srm.hmc.time = microbenchmark(srm.hmc.draws <- mcmc(start = c(-5, 2),
                                grad.theta.H = function(theta, p) { grad.theta.H(theta, p, data,  sample.n, pseudo.n)},
                                grad.p.H = function(theta, p) { grad.p.H(theta, p, data, sample.n, pseudo.n)},
                                fixed.point.steps = 6,
-                               epsilon = 0.05), times = 1)
+                               epsilon = 0.75), times = 1)
 
 srm.hmc.esps = min(effectiveSize(as.mcmc(srm.hmc.draws))) / (srm.hmc.time$time[1] / 1e9)
 z = kde2d(srm.hmc.draws[, 1], srm.hmc.draws[, 2])
