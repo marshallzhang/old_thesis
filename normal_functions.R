@@ -22,12 +22,12 @@ d.normal = function(params, data) {
 
 # Gradient of bivariate normal density.
 grad.d.normal= function(params, data) {
-  -c((length(data) * params[1] - sum(data)) / params[2]^2, 
-    length(data) / (2 * params[2]^2) - (1 / (2 * params[2]^4)) * sum((data - params[1])^2))
+  -c((length(data) * params[1] - sum(data)) / params[2]^2,
+     (length(data) / params[2]) - (sum((data - params[1])^2) / params[2]^3))
 }
 
 # Compute numerical Fisher information and its derivatives.
-mc.fisher = function(covariance, sample.n, pseudo.n, snd = 0) {
+mc.fisher = function(proposal, sample.n, pseudo.n, snd = 0) {
   
   c = 0.0001
   
@@ -43,44 +43,50 @@ mc.fisher = function(covariance, sample.n, pseudo.n, snd = 0) {
   for (i in 1:sample.n) {
     
     # Generate vector from proposed parameters.
-    pseudodata = r.bimodal(pseudo.n, params)
+    pseudodata = r.normal(pseudo.n, proposal)
     
     # Make perturbation vector.
     perturb = ((rbinom(length(proposal), 1, 0.5) * 2 - 1) * c)
     
     # For derivative of Fisher information, or for regular Fisher information, find numerical derivatives.
     if (snd > 0) {
-      diff.g.plus = (grad.d.bimodal(proposal + perturb + perturb.2, pseudodata, params) - grad.d.bimodal(proposal + perturb - perturb.2, pseudodata, params)) * c^(-1)
-      diff.g.minus = (grad.d.bimodal(proposal - perturb + perturb.2, pseudodata, params) - grad.d.bimodal(proposal - perturb - perturb.2, pseudodata, params)) * c^(-1)
-      diff.g = t(diff.g.plus - diff.g.minus)
+      diff.g.plus = (grad.d.normal(proposal + perturb + perturb.2, pseudodata) - grad.d.normal(proposal + perturb - perturb.2, pseudodata)) * c^(-1)
+      diff.g.minus = (grad.d.normal(proposal - perturb + perturb.2, pseudodata) - grad.d.normal(proposal - perturb - perturb.2, pseudodata)) * c^(-1)
+      diff.g = (diff.g.plus - diff.g.minus)
     } else {
-      diff.g = t(grad.d.bimodal(proposal + perturb, pseudodata, params) - grad.d.bimodal(proposal - perturb, pseudodata, params))
+      diff.g = (grad.d.normal(proposal + perturb, pseudodata) - grad.d.normal(proposal - perturb, pseudodata))
     }
     
     # Get Hessian.
-    hessian = hessian + (diff.g %*% perturb^(-1) / 2 + t(diff.g %*% perturb^(-1)) / 2) / 2
+    hessian = hessian + (diff.g %*% t(perturb^(-1)) / 2 + t(diff.g %*% t(perturb^(-1))) / 2) / 2
   }
   
-  - hessian / (sample.n)
+  - hessian / sample.n
 }
 
 # Compute RM Hamiltonian.
-H = function(theta, p, data, sample.n, pseudo.n) {
-#   G = mc.fisher(theta, params, sample.n, pseudo.n)
-  N = length(data)
-  G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+H = function(theta, p, data, stochastic = F, ...) {
+  if (stochastic) {
+    G = mc.fisher(theta, ...)
+  } else {
+    N = length(data)
+    G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+  }
   -d.normal(theta, data) + log((2 * pi)^(2) * det(G)) / 2 + p %*% solve(G) %*% t(p)
 }
 
 # Compute gradient of RM Hamiltonian wrt theta.
-grad.theta.H = function(theta, p, data, sample.n, pseudo.n) {
-#   G = mc.fisher(theta, params, sample.n, pseudo.n)
-  N = length(data)
-  G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
-#   d.G.1 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 1)
-  d.G.1 = diag(c(0, 0))
-#   d.G.2 = mc.fisher(theta, params, sample.n, pseudo.n, snd = 2)
-  d.G.2 = diag(c(- (2 * N) / theta[2]^3, - (4 * N) / theta[2]^3))
+grad.theta.H = function(theta, p, data, stochastic = F, ...) {
+  if (stochastic) {
+    G = mc.fisher(theta, ...)
+    d.G.1 = mc.fisher(theta, ..., snd = 1)
+    d.G.2 = mc.fisher(theta, ..., snd = 2)
+  } else {
+    N = length(data)
+    G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+    d.G.1 = diag(c(0, 0))
+    d.G.2 = diag(c(- (2 * N) / theta[2]^3, - (4 * N) / theta[2]^3))
+  }
 
   inv.G = solve(G)
   
@@ -90,10 +96,13 @@ grad.theta.H = function(theta, p, data, sample.n, pseudo.n) {
 }
 
 # Compute gradient of RM Hamiltonian wrt p.
-grad.p.H = function(theta, p, data, sample.n, pseudo.n) {
-#   G = mc.fisher(theta, params, sample.n, pseudo.n)
-  N = length(data)
-  G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+grad.p.H = function(theta, p, data, stochastic = F, ...) {
+  if (stochastic) {
+    G = mc.fisher(theta, ...)
+  } else {
+    N = length(data)
+    G = diag(c(N / theta[2]^2, (2 * N) / theta[2]^2))
+  }
   solve(G) %*% t(p)
 }
 
@@ -121,7 +130,11 @@ mcmc = function(start, iterations, burn, type, trace, ...) {
       }
   }
   
-  tail(draws, -burn)
+  if (burn == 0) {
+    draws
+  } else {
+    tail(draws, -burn)
+  }
   
 }
 

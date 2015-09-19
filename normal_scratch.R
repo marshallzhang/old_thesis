@@ -16,7 +16,7 @@ data = r.normal(30, c(0, 10))
 mh.draws = NA
 mh.time = microbenchmark(mh.draws <- mcmc(start = c(5, 40), 
              iterations = 200,
-             burn = 1,
+             burn = 0,
              type = "mh",
              trace = 500,
              d.posterior = function(proposal) { d.normal(proposal, data)},
@@ -31,7 +31,7 @@ lines(mh.draws[,1], mh.draws[,2])
 # HMC.
 hmc.time = microbenchmark(hmc.draws <- mcmc(start = c(5, 40),
                                iterations = 200,
-                               burn = 1,
+                               burn = 0,
                                type = "hmc",
                                trace = 500,
                                U = function(proposal) { -d.normal(proposal, data)},
@@ -43,23 +43,44 @@ z = kde2d(hmc.draws[, 1], hmc.draws[, 2])
 contour(z, col = brewer.pal(9, "Blues"), xlim = c(-10, 10), ylim = c(5, 40))
 lines(hmc.draws[,1], hmc.draws[,2])
 
-# SRM-HMC.
-sample.n = 1000
-pseudo.n = 1000
-srm.hmc.time = microbenchmark(srm.hmc.draws <- mcmc(start = c(5, 40),
+# RM-HMC.
+rm.hmc.time = microbenchmark(rm.hmc.draws <- mcmc(start = c(5, 40),
                                iterations = 200,
-                               burn = 1,
+                               burn = 0,
                                type = "srm-hmc",
                                trace = 1,
                                params = welling.teh,
                                sample.n = sample.n,
                                pseudo.n = pseudo.n,
-                               H = function(theta, p) { H(theta, p, data, sample.n, pseudo.n)},
-                               grad.theta.H = function(theta, p) { grad.theta.H(theta, p, data,  sample.n, pseudo.n)},
-                               grad.p.H = function(theta, p) { grad.p.H(theta, p, data, sample.n, pseudo.n)},
+                               H = function(theta, p) { H(theta, p, data)},
+                               grad.theta.H = function(theta, p) { grad.theta.H(theta, p, data)},
+                               grad.p.H = function(theta, p) { grad.p.H(theta, p, data)},
+                               fixed.point.steps = 6,
+                               epsilon = 0.75), times = 1)
+
+rm.hmc.esps = min(effectiveSize(as.mcmc(rm.hmc.draws))) / (rm.hmc.time$time[1] / 1e9)
+z = kde2d(rm.hmc.draws[, 1], rm.hmc.draws[, 2])
+contour(z, col = brewer.pal(9, "Blues"), xlim = c(-10, 10), ylim = c(5, 40))
+lines(rm.hmc.draws[,1], rm.hmc.draws[,2])
+
+# SRM-HMC.
+sample.n = 100
+pseudo.n = 100
+srm.hmc.time = microbenchmark(srm.hmc.draws <- mcmc(start = c(5, 40),
+                               iterations = 200,
+                               burn = 0,
+                               type = "srm-hmc",
+                               trace = 1,
+                               params = welling.teh,
+                               sample.n = sample.n,
+                               pseudo.n = pseudo.n,
+                               H = function(theta, p) { H(theta, p, data, stochastic = T, sample.n = sample.n, pseudo.n = pseudo.n)},
+                               grad.theta.H = function(theta, p) { grad.theta.H(theta, p, data, stochastic = T, sample.n = sample.n, pseudo.n = pseudo.n)},
+                               grad.p.H = function(theta, p) { grad.p.H(theta, p, data, stochastic = T, sample.n = sample.n, pseudo.n = pseudo.n)},
                                fixed.point.steps = 6,
                                epsilon = 0.75), times = 1)
 
 srm.hmc.esps = min(effectiveSize(as.mcmc(srm.hmc.draws))) / (srm.hmc.time$time[1] / 1e9)
 z = kde2d(srm.hmc.draws[, 1], srm.hmc.draws[, 2])
-contour(z, col = brewer.pal(9, "Blues"), xlim = c(-3, 3), ylim = c(-3, 3))
+contour(z, col = brewer.pal(9, "Blues"), xlim = c(-10, 10), ylim = c(5, 40))
+lines(srm.hmc.draws[,1], srm.hmc.draws[,2])
